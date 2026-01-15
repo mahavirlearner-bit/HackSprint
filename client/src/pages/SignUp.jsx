@@ -100,7 +100,7 @@ const GearGuardAuth = () => {
     try {
       if (isSignUp) {
         // TODO: Replace with actual signup API call
-        const response = await fetch('http://localhost:5000/api/auth/signup', {
+        const response = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -127,7 +127,7 @@ const GearGuardAuth = () => {
         }, 2000);
       } else {
         // Sign in API call
-        const response = await fetch('http://localhost:5000/api/auth/signin', {
+        const response = await fetch('/api/auth/signin', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

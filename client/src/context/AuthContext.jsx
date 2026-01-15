@@ -72,7 +72,7 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       
       // Call real backend API
-      const response = await fetch('http://localhost:5000/api/auth/signin', {
+      const response = await fetch('/api/auth/signin', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -146,6 +146,8 @@ export const AuthProvider = ({ children }) => {
         return '/manager-dashboard';
       case 'technician':
         return '/technician-dashboard';
+      case 'user':
+        return '/user-dashboard';
       default:
         return '/signin';
     }

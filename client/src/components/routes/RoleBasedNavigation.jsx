@@ -11,7 +11,8 @@ import {
   Users,
   BarChart3,
   Settings,
-  LogOut
+  LogOut,
+  Plus
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './RoleBasedNavigation.css';
@@ -40,31 +41,31 @@ const RoleBasedNavigation = () => {
     admin: [
       {
         label: 'Admin Dashboard',
-        path: '/admin/dashboard',
+        path: '/admin-dashboard',
         icon: LayoutDashboard,
         description: 'System overview'
       },
       {
         label: 'Users',
-        path: '/admin/users',
+        path: '/users',
         icon: Users,
         description: 'Manage user accounts and roles'
       },
       {
         label: 'Teams',
-        path: '/admin/teams',
+        path: '/teams',
         icon: Users,
         description: 'Manage maintenance teams'
       },
       {
         label: 'Equipment',
-        path: '/admin/equipment',
+        path: '/equipment',
         icon: Wrench,
         description: 'Equipment configuration'
       },
       {
         label: 'Reports',
-        path: '/admin/reports',
+        path: '/reporting',
         icon: BarChart3,
         description: 'System reports and analytics'
       }
@@ -72,25 +73,25 @@ const RoleBasedNavigation = () => {
     manager: [
       {
         label: 'Manager Dashboard',
-        path: '/manager/dashboard',
+        path: '/manager-dashboard',
         icon: LayoutDashboard,
         description: 'KPI overview and trends'
       },
       {
         label: 'Calendar',
-        path: '/manager/calendar',
+        path: '/maintenance-calendar',
         icon: Calendar,
         description: 'Maintenance schedule'
       },
       {
         label: 'Equipment',
-        path: '/manager/equipment',
+        path: '/equipment',
         icon: Wrench,
         description: 'Equipment status and health'
       },
       {
         label: 'Reports',
-        path: '/manager/reports',
+        path: '/reporting',
         icon: BarChart3,
         description: 'Maintenance reports'
       }
@@ -98,21 +99,35 @@ const RoleBasedNavigation = () => {
     technician: [
       {
         label: 'My Dashboard',
-        path: '/technician/dashboard',
+        path: '/technician-dashboard',
         icon: LayoutDashboard,
         description: 'Your assigned tasks'
       },
       {
         label: 'Kanban Board',
-        path: '/technician/kanban',
+        path: '/maintenance-kanban',
         icon: Kanban,
         description: 'Work in progress board'
       },
       {
         label: 'My Tasks',
-        path: '/technician/tasks',
+        path: '/maintenance',
         icon: CheckSquare,
         description: 'All assigned tasks'
+      }
+    ],
+    user: [
+      {
+        label: 'My Dashboard',
+        path: '/user-dashboard',
+        icon: LayoutDashboard,
+        description: 'My reported issues'
+      },
+      {
+        label: 'Report Issue',
+        path: '/maintenance/new',
+        icon: Plus,
+        description: 'Create a new maintenance request'
       }
     ]
   };
