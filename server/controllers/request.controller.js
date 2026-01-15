@@ -1,5 +1,6 @@
 const MaintenanceRequest = require('../models/MaintenanceRequest');
 const { sendMaintenanceRequestNotification, sendCompletionNotification, sendOverdueNotification } = require('../services/notification.service');
+const { autoAssignTeam, applyAutoAssignment } = require('../services/autoAssign.service');
 const {
   canCreateRequest,
   canAssignTechnician,
@@ -39,11 +40,68 @@ const createRequest = async (req, res) => {
       instructions,
     } = req.body;
 
+    // Validate required fields
+    if (!category) {
+      return res.status(400).json({
+        message: 'Equipment category is required for auto-assignment'
+      });
+    }
+    
+    // Handle empty string technician
+    if (technician === '') {
+       // assignedTechnician logic below handles null/undefined
+    }
+
     // When a regular user creates a request, it should have status "New" and no assigned technician
     // Only managers can pre-assign technicians at creation time
     let assignedTechnician = null;
     if (technician && req.user.role === 'manager') {
-      assignedTechnician = technician;
+      // Validate technician ID format if provided
+      if (technician.match(/^[0-9a-fA-F]{24}$/)) {
+        assignedTechnician = technician;
+      }
+    }
+
+    // Auto-assign team based on equipment category from database
+    let autoAssignedTeamName = null;
+    let autoAssignedTeamId = team; // Use provided team as fallback
+    
+    try {
+      const assignment = await autoAssignTeam(category);
+      autoAssignedTeamName = assignment.assignedTeam;
+      autoAssignedTeamId = assignment.teamId;
+    } catch (autoAssignError) {
+      // Log error but don't fail the request - it might be a new category
+      console.error('Auto-assignment error:', autoAssignError.message);
+      
+      // If team was provided, use it; otherwise return error
+      if (!team) {
+        return res.status(400).json({
+          message: `No team found for category "${category}". Please select a team manually or create a team for this category.`,
+          error: autoAssignError.message
+        });
+      }
+      
+      autoAssignedTeamName = null; // Will try to fetch team name from team ID
+      autoAssignedTeamId = team;
+    }
+
+    // If we have a team ID, fetch the team to get the name
+    if (autoAssignedTeamId && !autoAssignedTeamName) {
+      try {
+        const MaintenanceTeam = require('../models/MaintenanceTeam');
+        const teamDoc = await MaintenanceTeam.findById(autoAssignedTeamId);
+        if (teamDoc) {
+          autoAssignedTeamName = teamDoc.teamName;
+        }
+      } catch (err) {
+        console.error('Error fetching team:', err.message);
+      }
+    }
+
+    // Ensure we have a team name
+    if (!autoAssignedTeamName) {
+      autoAssignedTeamName = 'Unassigned';
     }
 
     const newRequest = new MaintenanceRequest({
@@ -53,7 +111,9 @@ const createRequest = async (req, res) => {
       equipment,
       category,
       maintenanceType,
-      team,
+      team: autoAssignedTeamId,
+      assignedTeam: autoAssignedTeamName,
+      equipmentCategory: category,
       technician: assignedTechnician,
       scheduledDate,
       durationHours,
@@ -78,7 +138,7 @@ const createRequest = async (req, res) => {
 
     res.status(201).json(savedRequest);
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
   }
 };
 
@@ -91,6 +151,7 @@ const getAllRequests = async (req, res) => {
 
     // Admins and managers can see all requests
     // Technicians can only see requests assigned to them or created by them
+    // Users can only see requests created by them
     if (req.user.role === 'technician') {
       query = {
         $or: [
@@ -98,17 +159,18 @@ const getAllRequests = async (req, res) => {
           { createdBy: req.user._id }
         ]
       };
+    } else if (req.user.role === 'user') {
+      query = { createdBy: req.user._id };
     }
 
     const requests = await MaintenanceRequest.find(query)
       .populate('createdBy', 'firstName lastName')
-      .populate('equipment', 'name')
       .populate('team', 'teamName')
       .populate('technician', 'firstName lastName');
 
     res.json(requests);
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
   }
 };
 
@@ -119,7 +181,6 @@ const getRequestById = async (req, res) => {
   try {
     const request = await MaintenanceRequest.findById(req.params.id)
       .populate('createdBy', 'firstName lastName')
-      .populate('equipment', 'name')
       .populate('team', 'teamName')
       .populate('technician', 'firstName lastName');
 
@@ -139,7 +200,7 @@ const getRequestById = async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
   }
 };
 
@@ -177,7 +238,12 @@ const updateRequest = async (req, res) => {
     }
 
     const oldStatus = request.status;
-    const oldTechnician = request.technician ? String(request.technician._id) : null;
+    const oldTechnician = request.technician ? String(request.technician._id || request.technician) : null;
+
+    // Handle empty string technician from frontend
+    if (technician === '') {
+      req.body.technician = null;
+    }
 
     /**
      * HANDLE TECHNICIAN ASSIGNMENT
@@ -249,25 +315,13 @@ const updateRequest = async (req, res) => {
         });
       }
 
+      // Technicians update ONLY notes and instructions.
+      // We ignore other fields present in the body (like subject, priority, etc.)
+      // because the frontend form sends the entire object back on save.
       if (notes !== undefined) request.notes = notes;
       if (instructions !== undefined) request.instructions = instructions;
-
-      // Prevent technicians from changing other fields
-      if (
-        subject !== undefined ||
-        equipment !== undefined ||
-        category !== undefined ||
-        maintenanceType !== undefined ||
-        team !== undefined ||
-        scheduledDate !== undefined ||
-        durationHours !== undefined ||
-        priority !== undefined ||
-        company !== undefined
-      ) {
-        return res.status(403).json({
-          message: 'Technicians can only update notes and instructions'
-        });
-      }
+      
+      // Explicitly DO NOT update other fields, and DO NOT throw error if they are present.
     }
 
     const updatedRequest = await request.save();
@@ -292,7 +346,7 @@ const updateRequest = async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
   }
 };
 
@@ -315,7 +369,7 @@ const deleteRequest = async (req, res) => {
     await request.deleteOne();
     res.json({ message: 'Maintenance request removed' });
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
   }
 };
 
@@ -354,7 +408,192 @@ const checkOverdueRequests = async (req, res) => {
       message: `Checked ${overdueRequests.length} overdue requests, sent ${notificationsSent} notifications`
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
+  }
+};
+
+// @desc    Export maintenance requests in specified format
+// @route   GET /api/requests/export
+// @access  Private (Manager/Admin only)
+const exportRequests = async (req, res) => {
+  try {
+    // Only managers and admins can export requests
+    if (!['manager', 'admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        message: 'Only managers and admins can export requests'
+      });
+    }
+
+    const { format = 'csv', team, status, fromDate, toDate } = req.query;
+
+    // Validate format
+    if (!['csv', 'excel', 'pdf'].includes(format.toLowerCase())) {
+      return res.status(400).json({
+        message: 'Invalid format. Supported formats: csv, excel, pdf'
+      });
+    }
+
+    // Build query filters
+    let query = {};
+
+    if (team) {
+      query.assignedTeam = new RegExp(team, 'i');
+    }
+
+    if (status) {
+      query.status = status;
+    }
+
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) {
+        const fromDateObj = new Date(fromDate);
+        fromDateObj.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = fromDateObj;
+      }
+      if (toDate) {
+        const toDateObj = new Date(toDate);
+        toDateObj.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = toDateObj;
+      }
+    }
+
+    // Fetch requests with filters
+    const requests = await MaintenanceRequest.find(query)
+      .populate('technician', 'firstName lastName')
+      .populate('createdBy', 'firstName lastName')
+      .sort({ createdAt: -1 });
+
+    if (requests.length === 0) {
+      return res.status(404).json({
+        message: 'No requests found matching the criteria'
+      });
+    }
+
+    const { exportToCSV, exportToExcel, exportToPDF } = require('../utils/exportUtils');
+
+    try {
+      let filePath;
+      const timestamp = new Date().toISOString().slice(0, 10);
+      
+      switch (format.toLowerCase()) {
+        case 'csv':
+          filePath = await exportToCSV(requests, `requests-${timestamp}.csv`);
+          if (!filePath) {
+            throw new Error('Failed to generate CSV file');
+          }
+          res.download(filePath, `maintenance-requests-${timestamp}.csv`, (err) => {
+            if (err) {
+              console.error('Download error:', err);
+            }
+          });
+          break;
+
+        case 'excel':
+          filePath = await exportToExcel(requests, `requests-${timestamp}.xlsx`);
+          if (!filePath) {
+            throw new Error('Failed to generate Excel file');
+          }
+          res.download(filePath, `maintenance-requests-${timestamp}.xlsx`, (err) => {
+            if (err) {
+              console.error('Download error:', err);
+            }
+          });
+          break;
+
+        case 'pdf':
+          filePath = await exportToPDF(requests, `requests-${timestamp}.pdf`);
+          if (!filePath) {
+            throw new Error('Failed to generate PDF file');
+          }
+          res.download(filePath, `maintenance-requests-${timestamp}.pdf`, (err) => {
+            if (err) {
+              console.error('Download error:', err);
+            }
+          });
+          break;
+
+        default:
+          return res.status(400).json({
+            message: 'Unsupported export format'
+          });
+      }
+    } catch (exportError) {
+      console.error('Export error details:', exportError);
+      res.status(500).json({
+        message: 'Failed to export requests: ' + (exportError.message || 'Unknown error'),
+        error: exportError.message
+      });
+    }
+  } catch (error) {
+    console.error('Export controller error:', error);
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: error.message,
+      details: error.stack 
+    });
+  }
+};
+
+// @desc    Get team mapping for auto-assignment
+// @route   GET /api/requests/team-mapping
+// @access  Private
+const getTeamMapping = async (req, res) => {
+  try {
+    const { getTeamsByCategory, getAvailableCategories } = require('../services/autoAssign.service');
+    
+    const teamsByCategory = await getTeamsByCategory();
+    const categories = await getAvailableCategories();
+
+    res.json({
+      categories,
+      teamsByCategory,
+      message: 'Team mapping retrieved successfully from database'
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
+  }
+};
+
+// @desc    Preview team assignment for equipment category
+// @route   POST /api/requests/preview-assignment
+// @access  Private
+const previewTeamAssignment = async (req, res) => {
+  try {
+    console.log('🔍 previewTeamAssignment called with body:', req.body);
+    const { equipmentCategory } = req.body;
+
+    if (!equipmentCategory) {
+      console.log('❌ Equipment category is required');
+      return res.status(400).json({
+        message: 'Equipment category is required'
+      });
+    }
+
+    try {
+      console.log('📊 Looking up team for category:', equipmentCategory);
+      const assignment = await autoAssignTeam(equipmentCategory);
+      console.log('✅ Found assignment:', assignment);
+
+      res.json({
+        equipmentCategory: equipmentCategory,
+        assignedTeam: assignment.assignedTeam,
+        teamId: assignment.teamId,
+        isAutoAssigned: assignment.isAutoAssigned,
+        isFromDatabase: assignment.isFromDatabase
+      });
+    } catch (assignError) {
+      // Return 200 with nulls instead of 404 to avoid frontend errors
+      // The frontend can handle assignedTeam being null
+      res.status(200).json({
+        message: assignError.message,
+        equipmentCategory: equipmentCategory,
+        assignedTeam: null,
+        teamId: null
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message, stack: error.stack });
   }
 };
 
@@ -365,4 +604,7 @@ module.exports = {
   updateRequest,
   deleteRequest,
   checkOverdueRequests,
+  exportRequests,
+  getTeamMapping,
+  previewTeamAssignment,
 };

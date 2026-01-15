@@ -2,21 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Wrench, ChevronDown, Calendar, Clock,
-  Save, Send, X, ArrowLeft
+  Save, Send, X, ArrowLeft, Zap
 } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { createMaintenanceRequest, getMaintenanceRequestById, updateMaintenanceRequest, deleteMaintenanceRequest } from '../api/maintenance.api';
+import {
+  createMaintenanceRequest,
+  getMaintenanceRequestById,
+  updateMaintenanceRequest,
+  deleteMaintenanceRequest,
+  previewTeamAssignment as previewTeamAssignmentAPI
+} from '../api/maintenance.api';
 
 export default function CreateMaintenanceRequest({ user }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const params = useParams();
   const isEdit = Boolean(params?.id);
+  const isUser = user?.role === 'user';
+  const isTechnician = user?.role === 'technician';
+  
   const [formData, setFormData] = useState({
     subject: '',
     equipment: '',
     category: '',
-    maintenanceType: 'Corrective',
+    maintenanceType: isUser ? 'Corrective' : 'Corrective',
     team: '',
     technician: '',
     requestDate: '',
@@ -33,19 +42,21 @@ export default function CreateMaintenanceRequest({ user }) {
   const [equipmentList, setEquipmentList] = useState([]);
   const [teamList, setTeamList] = useState([]);
   const [technicianList, setTechnicianList] = useState([]);
+  const [suggestedTeam, setSuggestedTeam] = useState(null);
+  const [autoAssignmentPreview, setAutoAssignmentPreview] = useState(null);
 
   // Fetch equipment, teams, and technicians
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
       toast.error('Authentication token not found. Please log in.');
-      navigate('/login');
+      navigate('/signin');
       return;
     }
 
     const fetchEquipmentList = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/equipment', {
+        const response = await fetch('/api/equipment', {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -56,14 +67,14 @@ export default function CreateMaintenanceRequest({ user }) {
         const data = await response.json();
         setEquipmentList(data);
       } catch (error) {
-        toast.error(error.message || 'Error fetching equipment');
+        // toast.error(error.message || 'Error fetching equipment');
         console.error('Error fetching equipment:', error);
       }
     };
 
     const fetchTeamList = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/teams', {
+        const response = await fetch('/api/teams', {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -74,14 +85,17 @@ export default function CreateMaintenanceRequest({ user }) {
         const data = await response.json();
         setTeamList(data);
       } catch (error) {
-        toast.error(error.message || 'Error fetching teams');
+        // toast.error(error.message || 'Error fetching teams');
         console.error('Error fetching teams:', error);
       }
     };
 
     const fetchTechnicianList = async () => {
+      // Users don't need technician list
+      if (isUser) return;
+      
       try {
-        const response = await fetch('http://localhost:5000/api/profile/usernames', {
+        const response = await fetch('/api/profile/usernames', {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -92,7 +106,7 @@ export default function CreateMaintenanceRequest({ user }) {
         const data = await response.json();
         setTechnicianList(data);
       } catch (error) {
-        toast.error(error.message || 'Error fetching usernames');
+        // toast.error(error.message || 'Error fetching usernames');
         console.error('Error fetching usernames:', error);
       }
     };
@@ -100,7 +114,7 @@ export default function CreateMaintenanceRequest({ user }) {
     fetchEquipmentList();
     fetchTeamList();
     fetchTechnicianList();
-  }, [navigate]);
+  }, [navigate, isUser]);
 
   // If editing, load existing maintenance request
   useEffect(() => {
@@ -113,13 +127,13 @@ export default function CreateMaintenanceRequest({ user }) {
         setFormData(prev => ({
           ...prev,
           subject: data.subject || '',
-          equipment: data.equipment?._id || data.equipment || '',
+          equipment: data.equipment || '',  // equipment is now a string (equipment name)
           category: data.category || '',
           maintenanceType: data.maintenanceType || 'Corrective',
           team: data.team?._id || data.team || '',
           technician: data.technician?._id || data.technician || '',
-          requestDate: data.requestDate ? new Date(data.requestDate).toISOString().slice(0,10) : '',
-          scheduledDate: data.scheduledDate ? new Date(data.scheduledDate).toISOString().slice(0,16) : '',
+          requestDate: data.requestDate ? new Date(data.requestDate).toISOString().slice(0, 10) : '',
+          scheduledDate: data.scheduledDate ? new Date(data.scheduledDate).toISOString().slice(0, 16) : '',
           durationHours: data.durationHours || '',
           priority: data.priority || 'Medium',
           company: data.company || '',
@@ -135,6 +149,34 @@ export default function CreateMaintenanceRequest({ user }) {
 
     fetchRequest();
   }, [isEdit, params.id]);
+
+  // Auto-assign team preview when category changes
+  useEffect(() => {
+    if (!formData.category) {
+      setAutoAssignmentPreview(null);
+      return;
+    }
+
+    const previewTeamAssignment = async () => {
+      try {
+        const data = await previewTeamAssignmentAPI(formData.category);
+        setAutoAssignmentPreview(data);
+        setSuggestedTeam(data.assignedTeam);
+
+        // Auto-fill team if not already selected
+        if (!formData.team && data.teamId) {
+          setFormData(prev => ({
+            ...prev,
+            team: data.teamId
+          }));
+        }
+      } catch (error) {
+        console.error('Error previewing team assignment:', error);
+      }
+    };
+
+    previewTeamAssignment();
+  }, [formData.category]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -160,9 +202,14 @@ export default function CreateMaintenanceRequest({ user }) {
       toast.error('Category is required');
       return;
     }
+    if (!formData.team && !isUser) { // Users might rely on auto-assignment happening in backend too if UI fails, but we force them to see it in UI
+       // Actually, UI auto-fills it.
+    }
     if (!formData.team) {
-      toast.error('Team is required');
-      return;
+        // If team is empty but we have category, backend might handle it, but let's enforce or warn
+        // For now, assume required
+        toast.error('Team is required (select category to auto-assign)');
+        return;
     }
     if (!formData.company.trim()) {
       toast.error('Company is required');
@@ -187,7 +234,12 @@ export default function CreateMaintenanceRequest({ user }) {
       }
 
       toast.success(saveAsDraft ? 'Request saved as draft' : 'Maintenance request created successfully');
-      navigate('/maintenance');
+      
+      if (isUser) {
+          navigate('/user-dashboard');
+      } else {
+          navigate('/maintenance');
+      }
     } catch (error) {
       toast.error(error.message || 'Failed to create maintenance request');
       console.error('Error creating request:', error);
@@ -210,12 +262,14 @@ export default function CreateMaintenanceRequest({ user }) {
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
                   GearGuard
                 </h1>
-                <p className="text-sm text-gray-400">Create Maintenance Request</p>
+                <p className="text-sm text-gray-400">
+                    {isEdit ? 'Edit Request' : 'Report Issue'}
+                </p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
               <button
-                onClick={() => navigate('/maintenance')}
+                onClick={() => navigate(isUser ? '/user-dashboard' : '/maintenance')}
                 className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -227,7 +281,7 @@ export default function CreateMaintenanceRequest({ user }) {
               >
                 {user ? (user.username ? user.username.charAt(0).toUpperCase() : user.firstName?.charAt(0).toUpperCase() || 'U') : 'U'}
               </button>
-              {isEdit && (
+              {isEdit && !isUser && ( // Users cannot delete requests
                 <button
                   onClick={async () => {
                     if (!window.confirm('Delete this maintenance request?')) return;
@@ -256,7 +310,7 @@ export default function CreateMaintenanceRequest({ user }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => navigate('/maintenance')}
+              onClick={() => navigate(isUser ? '/user-dashboard' : '/maintenance')}
               className="flex items-center space-x-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -265,7 +319,7 @@ export default function CreateMaintenanceRequest({ user }) {
             <div className="flex items-center space-x-2 text-sm text-gray-400">
               <span>Maintenance Requests</span>
               <span>/</span>
-              <span className="text-white">New Request</span>
+              <span className="text-white">{isEdit ? 'Edit' : 'New'} Request</span>
             </div>
           </div>
         </div>
@@ -304,13 +358,21 @@ export default function CreateMaintenanceRequest({ user }) {
                       <select
                         name="equipment"
                         value={formData.equipment}
-                        onChange={handleInputChange}
+                        onChange={(e) => {
+                          const selectedName = e.target.value;
+                          const selectedEq = equipmentList.find(eq => eq.name === selectedName);
+                          setFormData(prev => ({
+                            ...prev,
+                            equipment: selectedName,
+                            category: selectedEq ? selectedEq.category : prev.category
+                          }));
+                        }}
                         required
                         className="w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white appearance-none focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
                       >
                         <option value="">Select Equipment</option>
                         {equipmentList.map((eq) => (
-                          <option key={eq._id} value={eq._id}>
+                          <option key={eq._id} value={eq.name}>
                             {eq.name}
                           </option>
                         ))}
@@ -323,15 +385,29 @@ export default function CreateMaintenanceRequest({ user }) {
                     <label className="block text-sm font-medium text-gray-400 mb-2">
                       Category <span className="text-red-400">*</span>
                     </label>
-                    <input
-                      type="text"
-                      name="category"
-                      value={formData.category}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
-                      placeholder="e.g., Computers, HVAC, Electrical"
-                    />
+                    <div className="relative">
+                      <select
+                        name="category"
+                        value={formData.category}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white appearance-none focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
+                      >
+                        <option value="">Select a category...</option>
+                        <option value="Manufacturing & Industrial">Manufacturing & Industrial</option>
+                        <option value="IT & Office">IT & Office</option>
+                        <option value="HVAC & Climate Control">HVAC & Climate Control</option>
+                        <option value="Electrical & Power">Electrical & Power</option>
+                        <option value="Heavy Equipment">Heavy Equipment</option>
+                        <option value="Plumbing & Water Systems">Plumbing & Water Systems</option>
+                        <option value="Security & Safety">Security & Safety</option>
+                        <option value="Medical & Laboratory">Medical & Laboratory</option>
+                        <option value="Automotive">Automotive</option>
+                        <option value="Kitchen & Appliances">Kitchen & Appliances</option>
+                        <option value="General Maintenance">General Maintenance</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                    </div>
                   </div>
 
                   <div>
@@ -351,7 +427,8 @@ export default function CreateMaintenanceRequest({ user }) {
                   </div>
                 </div>
 
-                {/* Maintenance Type */}
+                {/* Maintenance Type - Only show options if not user */}
+                {!isUser && (
                 <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6">
                   <label className="block text-sm font-medium text-gray-400 mb-4">
                     Maintenance Type <span className="text-red-400">*</span>
@@ -359,8 +436,8 @@ export default function CreateMaintenanceRequest({ user }) {
                   <div className="space-y-3">
                     <label className="flex items-center space-x-3 cursor-pointer group">
                       <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${formData.maintenanceType === 'Corrective'
-                          ? 'border-cyan-500 bg-cyan-500'
-                          : 'border-slate-600 group-hover:border-slate-500'
+                        ? 'border-cyan-500 bg-cyan-500'
+                        : 'border-slate-600 group-hover:border-slate-500'
                         }`}>
                         {formData.maintenanceType === 'Corrective' && (
                           <div className="w-2 h-2 bg-white rounded-full" />
@@ -379,8 +456,8 @@ export default function CreateMaintenanceRequest({ user }) {
 
                     <label className="flex items-center space-x-3 cursor-pointer group">
                       <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${formData.maintenanceType === 'Preventive'
-                          ? 'border-cyan-500 bg-cyan-500'
-                          : 'border-slate-600 group-hover:border-slate-500'
+                        ? 'border-cyan-500 bg-cyan-500'
+                        : 'border-slate-600 group-hover:border-slate-500'
                         }`}>
                         {formData.maintenanceType === 'Preventive' && (
                           <div className="w-2 h-2 bg-white rounded-full" />
@@ -398,6 +475,7 @@ export default function CreateMaintenanceRequest({ user }) {
                     </label>
                   </div>
                 </div>
+                )}
 
                 {/* Company */}
                 <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6">
@@ -420,6 +498,19 @@ export default function CreateMaintenanceRequest({ user }) {
               <div className="space-y-6">
                 {/* Team & Technician */}
                 <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 space-y-4">
+                  {/* Auto-Assignment Preview */}
+                  {autoAssignmentPreview && (
+                    <div className="bg-gradient-to-r from-blue-900/30 to-cyan-900/30 border border-cyan-500/30 rounded-lg p-4 flex items-start space-x-3">
+                      <Zap className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-cyan-300">Auto-Assignment Suggested</p>
+                        <p className="text-xs text-gray-300 mt-1">
+                          Team: <span className="font-semibold text-cyan-400">{autoAssignmentPreview.assignedTeam}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">
                       Team <span className="text-red-400">*</span>
@@ -430,7 +521,8 @@ export default function CreateMaintenanceRequest({ user }) {
                         value={formData.team}
                         onChange={handleInputChange}
                         required
-                        className="w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white appearance-none focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
+                        disabled={isUser} // Users should rely on auto-assignment or predefined flow, but keeping it visible
+                        className={`w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white appearance-none focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all ${isUser ? 'opacity-70 cursor-not-allowed' : ''}`}
                       >
                         <option value="">Select Team</option>
                         {teamList.map((team) => (
@@ -439,10 +531,13 @@ export default function CreateMaintenanceRequest({ user }) {
                           </option>
                         ))}
                       </select>
-                      <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                      {!isUser && (
+                        <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                      )}
                     </div>
                   </div>
 
+                  {!isUser && (
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">
                       Technician
@@ -464,9 +559,11 @@ export default function CreateMaintenanceRequest({ user }) {
                       <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                     </div>
                   </div>
+                  )}
                 </div>
 
-                {/* Schedule & Duration */}
+                {/* Schedule & Duration - Hide for Users */}
+                {!isUser && (
                 <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">
@@ -503,6 +600,7 @@ export default function CreateMaintenanceRequest({ user }) {
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* Priority */}
                 <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6">
@@ -526,7 +624,8 @@ export default function CreateMaintenanceRequest({ user }) {
                   </div>
                 </div>
 
-                {/* Status */}
+                {/* Status - Hide for Users (Always New) */}
+                {!isUser && (
                 <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6">
                   <label className="block text-sm font-medium text-gray-400 mb-2">
                     Status
@@ -546,6 +645,7 @@ export default function CreateMaintenanceRequest({ user }) {
                     <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                   </div>
                 </div>
+                )}
               </div>
             </div>
 
@@ -556,8 +656,8 @@ export default function CreateMaintenanceRequest({ user }) {
                   type="button"
                   onClick={() => setActiveTab('Notes')}
                   className={`px-6 py-3 font-medium transition-all ${activeTab === 'Notes'
-                      ? 'bg-slate-700 text-cyan-400 border-b-2 border-cyan-400'
-                      : 'text-gray-400 hover:text-gray-300'
+                    ? 'bg-slate-700 text-cyan-400 border-b-2 border-cyan-400'
+                    : 'text-gray-400 hover:text-gray-300'
                     }`}
                 >
                   Notes
@@ -566,8 +666,8 @@ export default function CreateMaintenanceRequest({ user }) {
                   type="button"
                   onClick={() => setActiveTab('Instructions')}
                   className={`px-6 py-3 font-medium transition-all ${activeTab === 'Instructions'
-                      ? 'bg-slate-700 text-cyan-400 border-b-2 border-cyan-400'
-                      : 'text-gray-400 hover:text-gray-300'
+                    ? 'bg-slate-700 text-cyan-400 border-b-2 border-cyan-400'
+                    : 'text-gray-400 hover:text-gray-300'
                     }`}
                 >
                   Instructions
@@ -589,7 +689,7 @@ export default function CreateMaintenanceRequest({ user }) {
             <div className="mt-6 flex items-center justify-end space-x-4">
               <button
                 type="button"
-                onClick={() => navigate('/maintenance')}
+                onClick={() => navigate(isUser ? '/user-dashboard' : '/maintenance')}
                 className="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition-all"
               >
                 Cancel

@@ -12,9 +12,8 @@ const maintenanceRequestSchema = new mongoose.Schema(
     },
 
     equipment: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "Equipment", 
-      required: true                                     // Acer Laptop...
+      type: String,                                      // Equipment name or description (user can type freely)
+      required: true                                     // e.g., "Server", "Printer", "HVAC Unit"
     },
 
     category: { type: String, required: true },          // Computers
@@ -31,6 +30,17 @@ const maintenanceRequestSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId, 
       ref: "MaintenanceTeam", 
       required: true 
+    },
+
+    assignedTeam: {
+      type: String,
+      required: true,                                    // Team name auto-assigned from category
+      default: "General Maintenance"
+    },
+
+    equipmentCategory: {
+      type: String,
+      required: true,                                    // Equipment category for auto-assignment
     },
 
     technician: { 
