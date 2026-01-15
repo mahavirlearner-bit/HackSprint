@@ -74,3 +74,46 @@ export const deleteMaintenanceRequest = async (id) => {
     throw error;
   }
 };
+
+// Preview team assignment for a category
+export const previewTeamAssignment = async (equipmentCategory) => {
+  try {
+    const response = await axiosInstance.post('/preview-assignment', {
+      equipmentCategory
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error previewing team assignment:', error);
+    throw error;
+  }
+};
+
+// Get team mapping
+export const getTeamMapping = async () => {
+  try {
+    const response = await axiosInstance.get('/team-mapping');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching team mapping:', error);
+    throw error;
+  }
+};
+
+// Export requests
+export const exportRequests = async (format, filters = {}) => {
+  try {
+    const params = new URLSearchParams();
+    params.append('format', format);
+    
+    if (filters.team) params.append('team', filters.team);
+    if (filters.status) params.append('status', filters.status);
+    if (filters.fromDate) params.append('fromDate', filters.fromDate);
+    if (filters.toDate) params.append('toDate', filters.toDate);
+
+    const response = await axiosInstance.get(`/export?${params.toString()}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error exporting requests:', error);
+    throw error;
+  }
+};

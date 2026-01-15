@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wrench, Search, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Wrench, Search, Plus, Edit2, Trash2, Download } from 'lucide-react';
 import { getAllMaintenanceRequests } from '../api/maintenance.api';
 import { deleteMaintenanceRequest } from '../api/maintenance.api';
 import MainNavigation from '../components/common/MainNavigation';
+import ExportDialog from '../components/common/ExportDialog';
+import { toast } from 'react-toastify';
 
 export default function Maintenance({ user }) {
   const navigate = useNavigate();
   const [maintenanceData, setMaintenanceData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 
   useEffect(() => {
     const fetchMaintenanceRequests = async () => {
@@ -27,6 +30,71 @@ export default function Maintenance({ user }) {
     fetchMaintenanceRequests();
   }, []);
 
+  const handleExport = async (filters) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Authentication token not found');
+      return;
+    }
+
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.append('format', filters.format);
+      
+      if (filters.team) {
+        queryParams.append('team', filters.team);
+      }
+      if (filters.status) {
+        queryParams.append('status', filters.status);
+      }
+      if (filters.fromDate) {
+        queryParams.append('fromDate', filters.fromDate);
+      }
+      if (filters.toDate) {
+        queryParams.append('toDate', filters.toDate);
+      }
+
+      const response = await fetch(
+        `http://localhost:5000/api/requests/export?${queryParams.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(response.statusText);
+      }
+
+      // Get the filename from the Content-Disposition header
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = `maintenance-requests.${filters.format === 'excel' ? 'xlsx' : filters.format}`;
+      
+      if (contentDisposition) {
+        const matches = contentDisposition.match(/filename="?([^"]*)"?/);
+        if (matches) filename = matches[1];
+      }
+
+      // Create blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success(`Successfully exported as ${filters.format.toUpperCase()}`);
+    } catch (error) {
+      console.error('Export error:', error);
+      throw new Error('Failed to export requests: ' + error.message);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-gray-100">
       {/* Main Navigation */}
@@ -36,13 +104,23 @@ export default function Maintenance({ user }) {
       <main className="px-6 py-6">
         {/* Action Bar */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-          <button 
-            onClick={() => navigate('/maintenance/new')}
-            className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-blue-500/30"
-          >
-            <Plus className="w-5 h-5" />
-            <span>New</span>
-          </button>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => navigate('/maintenance/new')}
+              className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-blue-500/30"
+            >
+              <Plus className="w-5 h-5" />
+              <span>New</span>
+            </button>
+
+            <button 
+              onClick={() => setIsExportDialogOpen(true)}
+              className="flex items-center space-x-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 px-4 py-2 rounded-lg font-medium transition-all shadow-lg shadow-green-500/30"
+            >
+              <Download className="w-5 h-5" />
+              <span>Export</span>
+            </button>
+          </div>
 
           <div className="relative flex-1 max-w-md ml-6">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500" />
@@ -131,6 +209,13 @@ export default function Maintenance({ user }) {
           </div>
         </div>
       </main>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        isOpen={isExportDialogOpen}
+        onClose={() => setIsExportDialogOpen(false)}
+        onExport={handleExport}
+      />
     </div>
   );
 }
