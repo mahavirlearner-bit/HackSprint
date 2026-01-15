@@ -78,7 +78,7 @@ export default function Dashboard({ user, onLogout }) {
   // Filter recent requests based on search term
   const filteredRequests = dashboardData?.recentRequests?.filter(request =>
     request.subject?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    request.equipment?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (request.equipment?.name || request.equipment || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     request.technician?.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     request.technician?.lastName?.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
@@ -250,7 +250,7 @@ export default function Dashboard({ user, onLogout }) {
                     <div>
                       <p className="text-sm font-medium text-white">{item.subject}</p>
                       <p className="text-xs text-gray-400">
-                        {item.equipment?.name} • {item.technician ? `${item.technician.firstName} ${item.technician.lastName}` : 'Unassigned'}
+                        {item.equipment?.name || item.equipment} • {item.technician ? `${item.technician.firstName} ${item.technician.lastName}` : 'Unassigned'}
                       </p>
                     </div>
                   </div>
@@ -282,7 +282,7 @@ export default function Dashboard({ user, onLogout }) {
               {dashboardData.topEquipment.map((eq) => {
                 const percent = dashboardData.totalRequests ? Math.round((eq.count / dashboardData.totalRequests) * 100) : 0;
                 return (
-                  <div key={eq.equipmentId} className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
+                  <div key={eq.equipmentId || eq.name} className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
                     <div className="flex items-center space-x-3">
                       <Monitor className="w-5 h-5 text-cyan-400" />
                       <div>
@@ -291,7 +291,9 @@ export default function Dashboard({ user, onLogout }) {
                       </div>
                     </div>
                     <div className="text-right">
-                      <button onClick={() => navigate(`/equipment/${eq.equipmentId}`)} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-md text-sm">View</button>
+                      {eq.equipmentId && (
+                        <button onClick={() => navigate(`/equipment/${eq.equipmentId}`)} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-md text-sm">View</button>
+                      )}
                     </div>
                   </div>
                 );
@@ -309,7 +311,7 @@ export default function Dashboard({ user, onLogout }) {
             </div>
             <div className="space-y-3">
               {dashboardData.topDowntime.map(item => (
-                <div key={item.equipmentId} className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
+                <div key={item.equipmentId || item.name} className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
                   <div className="flex items-center space-x-3">
                     <Monitor className="w-5 h-5 text-cyan-400" />
                     <div>
@@ -318,7 +320,9 @@ export default function Dashboard({ user, onLogout }) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <button onClick={() => navigate(`/equipment/${item.equipmentId}`)} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-md text-sm">View</button>
+                    {item.equipmentId && (
+                      <button onClick={() => navigate(`/equipment/${item.equipmentId}`)} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-md text-sm">View</button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -351,7 +355,7 @@ export default function Dashboard({ user, onLogout }) {
                   filteredRequests.map((item) => (
                     <tr key={item._id} className="hover:bg-slate-700/30 transition-colors cursor-pointer" onClick={() => navigate(`/maintenance/${item._id}`)}>
                       <td className="px-6 py-4 text-sm text-gray-300">{item.subject}</td>
-                      <td className="px-6 py-4 text-sm text-gray-300">{item.equipment?.name || 'N/A'}</td>
+                      <td className="px-6 py-4 text-sm text-gray-300">{item.equipment?.name || item.equipment || 'N/A'}</td>
                       <td className="px-6 py-4 text-sm text-gray-300">
                         {item.technician ? `${item.technician.firstName} ${item.technician.lastName}` : 'Unassigned'}
                       </td>
